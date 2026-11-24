@@ -1,0 +1,25 @@
+---
+openldap_version: "2.6.16"
+openldap_download_url: https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-{{ openldap_version }}.tgz
+openldap_source_checksums:
+  "2.6.13": sha256:d693b49517a42efb85a1a364a310aed16a53d428d1b46c0d31ef3fba78fcb656
+  "2.6.16": sha256:8d8452bc3f56aa7a392c62dd377733f83d1314eed6c52fe44028439a3bb4df18
+  "2.7.2": sha256:aad731aa22118ff327b9b4ddfc4b6f18ef9476586205da88a532e90940b523d2
+openldap_source_checksum: "{{ openldap_source_checksums[openldap_version] | default('') }}"
+openldap_install_prefix: /usr/local
+
+openldap_base_dir: /opt/openldap
+openldap_base_dn: dc=moukail,dc=nl
+openldap_organization: Moukail
+
+openldap_user: ldap
+openldap_group: ldap
+openldap_root_dn: cn=admin,{{ openldap_base_dn }}
+openldap_schema_dir: "{{ openldap_install_prefix }}/etc/openldap/schema"
+
+openldap_tls_require: false  
+openldap_tls_enabled: false
+openldap_tls_ca_file: "{{ openldap_base_dir }}/certs/ca.crt"
+openldap_tls_cert_file: "{{ openldap_base_dir }}/certs/server.crt"
+openldap_tls_key_file: "{{ openldap_base_dir }}/certs/server.key"
+openldap_tls_protocol_min: "3.3" # 3.3 = TLS 1.2, 3.4 = TLS 1.3

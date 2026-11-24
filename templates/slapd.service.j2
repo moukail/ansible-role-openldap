@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenLDAP Server Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User={{ openldap_user }}
+Group={{ openldap_group }}
+RuntimeDirectory=openldap
+RuntimeDirectoryMode=0755
+PIDFile=/run/openldap/slapd.pid
+ExecStart={{ openldap_install_prefix }}/libexec/slapd -F {{ openldap_base_dir }}/config -h "ldap:/// {% if openldap_tls_enabled | bool %}ldaps:/// {% endif %}ldapi://%%2Frun%%2Fopenldap%%2Fldapi"
+Restart=on-failure
+
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

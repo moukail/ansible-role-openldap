@@ -1,0 +1,53 @@
+---
+- name: Prepare test containers
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Ensure Python 3, sudo, and openssl are installed
+      ansible.builtin.raw: >-
+        /bin/sh -c 'if command -v apt-get >/dev/null 2>&1; then
+        command -v python3 >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1 ||
+        (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 sudo openssl);
+        elif command -v dnf >/dev/null 2>&1; then
+        command -v python3 >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1 ||
+        dnf install -y -q python3 sudo openssl;
+        fi'
+      changed_when: false
+
+    - name: Create OpenLDAP certs directory for TLS testing
+      ansible.builtin.file:
+        path: /opt/openldap/certs
+        state: directory
+        mode: "0755"
+
+    - name: Generate test CA key and certificate
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -x509 -newkey rsa:2048 -nodes -days 30
+          -keyout /opt/openldap/certs/ca.key
+          -out /opt/openldap/certs/ca.crt
+          -subj "/CN=Molecule Test CA"
+        creates: /opt/openldap/certs/ca.crt
+
+    - name: Generate test OpenLDAP server CSR and key
+      ansible.builtin.command:
+        cmd: >-
+          openssl req -newkey rsa:2048 -nodes
+          -keyout /opt/openldap/certs/server.key
+          -out /opt/openldap/certs/server.csr
+          -subj "/CN=localhost"
+        creates: /opt/openldap/certs/server.key
+
+    - name: Sign test OpenLDAP server certificate with SANs
+      ansible.builtin.shell: >-
+        openssl x509 -req -days 30
+        -in /opt/openldap/certs/server.csr
+        -CA /opt/openldap/certs/ca.crt
+        -CAkey /opt/openldap/certs/ca.key
+        -CAcreateserial
+        -out /opt/openldap/certs/server.crt
+        -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
+      args:
+        executable: /bin/bash
+        creates: /opt/openldap/certs/server.crt

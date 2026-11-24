@@ -1,0 +1,265 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Capture TLS override from inventory before loading defaults
+      ansible.builtin.set_fact:
+        _verify_tls_enabled: "{{ openldap_tls_enabled | default(false) | bool }}"
+
+    - name: Load openldap role defaults
+      ansible.builtin.include_vars:
+        file: ../../defaults/main.yaml
+
+    - name: Check system slapd binary
+      ansible.builtin.stat:
+        path: /usr/sbin/slapd
+      register: _verify_system_slapd
+
+    - name: Check custom-prefix slapd binary
+      ansible.builtin.stat:
+        path: "{{ openldap_install_prefix }}/libexec/slapd"
+      register: _verify_custom_slapd
+
+    - name: Assert at least one slapd binary is installed and executable
+      ansible.builtin.assert:
+        that:
+          - >-
+            (_verify_system_slapd.stat.exists and _verify_system_slapd.stat.executable)
+            or
+            (_verify_custom_slapd.stat.exists and _verify_custom_slapd.stat.executable)
+        fail_msg: >-
+          No executable slapd binary found at /usr/sbin/slapd or
+          {{ openldap_install_prefix }}/libexec/slapd.
+
+    - name: Query system slapd version
+      ansible.builtin.command:
+        cmd: /usr/sbin/slapd -VV
+      register: _verify_system_version_cmd
+      changed_when: false
+      failed_when: false
+      when: _verify_system_slapd.stat.exists
+
+    - name: Query custom-prefix slapd version
+      ansible.builtin.command:
+        cmd: "{{ openldap_install_prefix }}/libexec/slapd -VV"
+      register: _verify_custom_version_cmd
+      changed_when: false
+      failed_when: false
+      when: _verify_custom_slapd.stat.exists
+
+    - name: Extract installed OpenLDAP versions from stderr
+      ansible.builtin.set_fact:
+        _verify_installed_versions: >-
+          {{
+            [
+              _verify_system_version_cmd.stderr | default('')
+                | regex_search('slapd\s+([0-9]+\.[0-9]+\.[0-9]+)', '\1') | default([], true),
+              _verify_custom_version_cmd.stderr | default('')
+                | regex_search('slapd\s+([0-9]+\.[0-9]+\.[0-9]+)', '\1') | default([], true)
+            ] | flatten
+          }}
+
+    - name: Assert an installed slapd version meets minimum requirement
+      ansible.builtin.assert:
+        that:
+          - _verify_installed_versions | length > 0
+          - >-
+            _verify_installed_versions
+            | select('version', openldap_version | string, '>=', version_type='loose')
+            | list | length > 0
+        fail_msg: >-
+          Installed OpenLDAP versions {{ _verify_installed_versions }} do not satisfy
+          requested minimum version {{ openldap_version }}.
+        success_msg: >-
+          Verified OpenLDAP version(s) {{ _verify_installed_versions }} satisfy
+          >= {{ openldap_version }}.
+
+    - name: Check OpenLDAP directories and cn=config bootstrap
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: _verify_paths
+      loop:
+        - path: "{{ openldap_base_dir }}/data"
+          isdir: true
+          mode: "0700"
+        - path: "{{ openldap_base_dir }}/config"
+          isdir: true
+          mode: "0750"
+        - path: "{{ openldap_base_dir }}/certs"
+          isdir: true
+          mode: "0750"
+        - path: "{{ openldap_base_dir }}/config/cn=config.ldif"
+          isdir: false
+
+    - name: Assert OpenLDAP directories and cn=config exist with expected permissions
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir == item.item.isdir
+          - item.item.mode is not defined or item.stat.mode == item.item.mode
+        fail_msg: >-
+          Expected {{ item.item.path }} (isdir={{ item.item.isdir }}, mode={{ item.item.mode | default('any') }})
+          but found exists={{ item.stat.exists }}, isdir={{ item.stat.isdir | default(false) }},
+          mode={{ item.stat.mode | default('n/a') }}.
+      loop: "{{ _verify_paths.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert slapd service is running and enabled
+      ansible.builtin.assert:
+        that:
+          - "'slapd.service' in ansible_facts.services"
+          - ansible_facts.services['slapd.service'].state == 'running'
+          - ansible_facts.services['slapd.service'].status == 'enabled'
+        fail_msg: >-
+          slapd.service is not running and enabled:
+          {{ ansible_facts.services['slapd.service'] | default('not found') }}
+
+    - name: Verify slapd is listening on port 389
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 389
+        timeout: 10
+
+    - name: Determine ldapsearch binary path
+      ansible.builtin.set_fact:
+        _verify_ldapsearch_bin: >-
+          {{
+            _verify_custom_slapd.stat.exists
+            | ternary(openldap_install_prefix ~ '/bin/ldapsearch', '/usr/bin/ldapsearch')
+          }}
+
+    - name: Query initialized OpenLDAP directory entries (LDAP)
+      ansible.builtin.command:
+        argv:
+          - "{{ _verify_ldapsearch_bin }}"
+          - "-x"
+          - "-H"
+          - "ldap://127.0.0.1"
+          - "-D"
+          - "{{ openldap_root_dn }}"
+          - "-w"
+          - "{{ openldap_root_password }}"
+          - "-b"
+          - "{{ openldap_base_dn }}"
+          - "(objectClass=*)"
+          - "dn"
+      register: _verify_ldapsearch
+      changed_when: false
+      no_log: true
+
+    - name: Assert base DN and default OUs exist in OpenLDAP
+      ansible.builtin.assert:
+        that:
+          - _verify_ldapsearch.rc == 0
+          - "'dn: ' ~ openldap_base_dn in _verify_ldapsearch.stdout"
+          - "'dn: ou=people,' ~ openldap_base_dn in _verify_ldapsearch.stdout"
+          - "'dn: ou=groups,' ~ openldap_base_dn in _verify_ldapsearch.stdout"
+        fail_msg: >-
+          Expected base DN ({{ openldap_base_dn }}), ou=people, and ou=groups in ldapsearch output.
+        success_msg: >-
+          Verified base DN ({{ openldap_base_dn }}), ou=people, and ou=groups in OpenLDAP.
+
+    - name: Verify TLS configuration, LDAPS, and StartTLS
+      when: _verify_tls_enabled | bool
+      block:
+        - name: Check OpenLDAP TLS certificate and key files
+          ansible.builtin.stat:
+            path: "{{ item.path }}"
+          register: _verify_tls_files
+          loop:
+            - path: "{{ openldap_tls_ca_file }}"
+              mode: "0644"
+            - path: "{{ openldap_tls_cert_file }}"
+              mode: "0644"
+            - path: "{{ openldap_tls_key_file }}"
+              mode: "0600"
+
+        - name: Assert OpenLDAP TLS files have expected ownership and modes
+          ansible.builtin.assert:
+            that:
+              - item.stat.exists
+              - item.stat.pw_name == openldap_user
+              - item.stat.gr_name == openldap_group
+              - item.stat.mode == item.item.mode
+            fail_msg: >-
+              TLS file {{ item.item.path }} mismatch: exists={{ item.stat.exists }},
+              owner={{ item.stat.pw_name | default('n/a') }}:{{ item.stat.gr_name | default('n/a') }},
+              mode={{ item.stat.mode | default('n/a') }}.
+          loop: "{{ _verify_tls_files.results }}"
+          loop_control:
+            label: "{{ item.item.path }}"
+
+        - name: Verify slapd is listening on LDAPS port 636
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 636
+            timeout: 10
+
+        - name: Query OpenLDAP via StartTLS (port 389 -ZZ)
+          ansible.builtin.command:
+            argv:
+              - "{{ _verify_ldapsearch_bin }}"
+              - "-x"
+              - "-ZZ"
+              - "-H"
+              - "ldap://127.0.0.1"
+              - "-D"
+              - "{{ openldap_root_dn }}"
+              - "-w"
+              - "{{ openldap_root_password }}"
+              - "-b"
+              - "{{ openldap_base_dn }}"
+              - "(objectClass=*)"
+              - "dn"
+          environment:
+            LDAPTLS_CACERT: "{{ openldap_tls_ca_file }}"
+          register: _verify_starttls
+          changed_when: false
+          no_log: true
+
+        - name: Assert StartTLS query succeeded and returned expected entries
+          ansible.builtin.assert:
+            that:
+              - _verify_starttls.rc == 0
+              - "'dn: ' ~ openldap_base_dn in _verify_starttls.stdout"
+              - "'dn: ou=people,' ~ openldap_base_dn in _verify_starttls.stdout"
+              - "'dn: ou=groups,' ~ openldap_base_dn in _verify_starttls.stdout"
+            fail_msg: "StartTLS ldapsearch failed or did not return expected entries."
+            success_msg: "Verified StartTLS (ldap://127.0.0.1 -ZZ) against OpenLDAP."
+
+        - name: Query OpenLDAP via LDAPS (port 636)
+          ansible.builtin.command:
+            argv:
+              - "{{ _verify_ldapsearch_bin }}"
+              - "-x"
+              - "-H"
+              - "ldaps://127.0.0.1:636"
+              - "-D"
+              - "{{ openldap_root_dn }}"
+              - "-w"
+              - "{{ openldap_root_password }}"
+              - "-b"
+              - "{{ openldap_base_dn }}"
+              - "(objectClass=*)"
+              - "dn"
+          environment:
+            LDAPTLS_CACERT: "{{ openldap_tls_ca_file }}"
+          register: _verify_ldaps
+          changed_when: false
+          no_log: true
+
+        - name: Assert LDAPS query succeeded and returned expected entries
+          ansible.builtin.assert:
+            that:
+              - _verify_ldaps.rc == 0
+              - "'dn: ' ~ openldap_base_dn in _verify_ldaps.stdout"
+              - "'dn: ou=people,' ~ openldap_base_dn in _verify_ldaps.stdout"
+              - "'dn: ou=groups,' ~ openldap_base_dn in _verify_ldaps.stdout"
+            fail_msg: "LDAPS ldapsearch failed or did not return expected entries."
+            success_msg: "Verified LDAPS (ldaps://127.0.0.1:636) against OpenLDAP."

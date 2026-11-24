@@ -1,0 +1,47 @@
+dn: cn=config
+objectClass: olcGlobal
+cn: config
+olcPidFile: /run/openldap/slapd.pid
+olcArgsFile: /run/openldap/slapd.args
+{% if openldap_tls_enabled | bool %}
+olcTLSCACertificateFile: {{ openldap_tls_ca_file }}
+olcTLSCertificateFile: {{ openldap_tls_cert_file }}
+olcTLSCertificateKeyFile: {{ openldap_tls_key_file }}
+olcTLSProtocolMin: {{ openldap_tls_protocol_min }}
+olcTLSCipherSuite: HIGH:!aNULL:!MD5
+{% endif %}
+
+dn: cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: schema
+
+include: file://{{ openldap_schema_dir }}/core.ldif
+include: file://{{ openldap_schema_dir }}/cosine.ldif
+include: file://{{ openldap_schema_dir }}/nis.ldif
+include: file://{{ openldap_schema_dir }}/inetorgperson.ldif
+
+dn: olcDatabase=frontend,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcFrontendConfig
+olcDatabase: frontend
+
+dn: olcDatabase=config,cn=config
+objectClass: olcDatabaseConfig
+olcDatabase: config
+olcRootDN: cn=config
+olcAccess: to * by dn.exact=gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth manage by * break
+
+dn: olcDatabase=mdb,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcMdbConfig
+olcDatabase: mdb
+olcSuffix: {{ openldap_base_dn }}
+olcRootDN: {{ openldap_root_dn }}
+olcRootPW: {{ _openldap_root_pw_hash.stdout }}
+olcDbDirectory: {{ openldap_base_dir }}/data
+olcDbMaxSize: 1073741824
+olcDbIndex: objectClass eq
+olcDbIndex: uid,cn eq,pres,sub
+{% if (openldap_tls_enabled | bool) and (openldap_tls_require | bool) %}
+olcSecurity: tls=1
+{% endif %}

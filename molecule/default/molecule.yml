@@ -1,0 +1,40 @@
+---
+dependency:
+  name: galaxy
+
+driver:
+  # Uses Podman natively (switch to "docker" if using Docker daemon)
+  name: podman
+
+platforms:
+  - name: openldap-almalinux9
+    image: docker.io/almalinux/9-init:latest
+    pre_build_image: true
+    command: /sbin/init
+    systemd: always
+
+  - name: openldap-debian12
+    image: docker.io/geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    systemd: always
+
+provisioner:
+  name: ansible
+  env:
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/.."
+  config_options:
+    defaults:
+      callbacks_enabled: profile_tasks
+  inventory:
+    group_vars:
+      all:
+        openldap_root_password: MoleculeTestPassword123!
+        openldap_tls_enabled: true
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+verifier:
+  name: ansible

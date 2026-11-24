@@ -1,0 +1,47 @@
+---
+- name: Check system OpenLDAP version
+  ansible.builtin.shell: /usr/sbin/slapd -VV 2>&1 | grep -oP 'slapd \K[0-9.]+'
+  register: openldap_system_result
+  changed_when: false
+  failed_when: false
+
+- name: Check custom OpenLDAP version
+  ansible.builtin.shell: "{{ openldap_install_prefix }}/libexec/slapd -VV 2>&1 | grep -oP 'slapd \\K[0-9.]+'"
+  register: openldap_custom_result
+  changed_when: false
+  failed_when: false
+
+- name: Initialize installed OpenLDAP versions
+  ansible.builtin.set_fact:
+    openldap_installed_versions: []
+
+- name: Add system OpenLDAP version
+  ansible.builtin.set_fact:
+    openldap_installed_versions: >-
+      {{ openldap_installed_versions +
+         [openldap_system_result.stdout | trim] }}
+  when: openldap_system_result.rc == 0
+
+- name: Add custom OpenLDAP version
+  ansible.builtin.set_fact:
+    openldap_installed_versions: >-
+      {{ openldap_installed_versions +
+         [openldap_custom_result.stdout | trim] }}
+  when: openldap_custom_result.rc == 0
+
+- name: Initialize installation requirement
+  ansible.builtin.set_fact:
+    openldap_install_required: true
+
+- name: Check whether any installed version meets requirement
+  ansible.builtin.set_fact:
+    openldap_install_required: false
+  when: item is version(openldap_version, '>=', version_type='loose')
+  loop: "{{ openldap_installed_versions }}"
+
+- name: Display OpenLDAP status
+  ansible.builtin.debug:
+    msg:
+      installed_versions: "{{ openldap_installed_versions }}"
+      requested_version: "{{ openldap_version }}"
+      installation_required: "{{ openldap_install_required }}"

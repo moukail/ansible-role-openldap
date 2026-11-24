@@ -1,0 +1,29 @@
+---
+- name: Copy base file
+  become: true
+  ansible.builtin.template:
+    src: base.ldif.j2
+    dest: "{{ openldap_base_dir }}/base.ldif"
+    mode: "0640"
+
+- name: Check if base DN is already initialized
+  ansible.builtin.command:
+    cmd: >-
+      {{ openldap_install_prefix }}/bin/ldapsearch
+      -x -H ldapi://%2Frun%2Fopenldap%2Fldapi
+      -D "{{ openldap_root_dn }}" -w "{{ openldap_root_password }}"
+      -b "{{ openldap_base_dn }}" -s base "(objectClass=*)"
+  register: _openldap_base_check
+  changed_when: false
+  failed_when: _openldap_base_check.rc not in [0, 32]
+  no_log: true
+
+- name: Initialize base DIT
+  ansible.builtin.command:
+    cmd: >-
+      {{ openldap_install_prefix }}/bin/ldapadd
+      -x -H ldapi://%2Frun%2Fopenldap%2Fldapi
+      -D "{{ openldap_root_dn }}" -w "{{ openldap_root_password }}"
+      -f "{{ openldap_base_dir }}/base.ldif"
+  when: _openldap_base_check.rc == 32
+  no_log: true

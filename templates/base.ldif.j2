@@ -1,0 +1,14 @@
+dn: {{ openldap_base_dn }}
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+o: {{ openldap_organization }}
+dc: {{ openldap_base_dn.split(',')[0].split('=')[1] }}
+
+dn: ou=people,{{ openldap_base_dn }}
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,{{ openldap_base_dn }}
+objectClass: organizationalUnit
+ou: groups

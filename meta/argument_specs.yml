@@ -1,0 +1,125 @@
+---
+argument_specs:
+  main:
+    short_description: Install, configure, and initialize an OpenLDAP (slapd) server.
+    description:
+      - Ensures OpenLDAP (slapd) is installed at or above the requested minimum version, falling back to compiling from checksum-verified upstream source if OS packages cannot satisfy the version constraint.
+      - Configures system user/group, directories, systemd unit, and C(cn=config) database, then initializes the base Directory Information Tree (DIT).
+    options:
+      openldap_version:
+        type: str
+        required: false
+        default: "2.6.16"
+        description:
+          - Minimum OpenLDAP version required on the target host (for example, C(2.6.16) or C(2.7.2)).
+          - Used to evaluate existing installations, constrain package installation, and select the upstream release archive if compiling from source.
+      openldap_download_url:
+        type: str
+        required: false
+        default: https://www.openldap.org/software/download/OpenLDAP/openldap-release/openldap-{{ openldap_version }}.tgz
+        description:
+          - URL of the OpenLDAP source archive (C(.tgz)) downloaded when compiling from source.
+      openldap_source_checksums:
+        type: dict
+        required: false
+        description:
+          - Mapping of OpenLDAP version strings to C(ansible.builtin.get_url) checksum values (C(<algorithm>:<digest>)).
+          - Used to resolve C(openldap_source_checksum) automatically for known versions.
+      openldap_source_checksum:
+        type: str
+        required: false
+        description:
+          - Checksum specification passed to C(ansible.builtin.get_url) in C(<algorithm>:<digest>) or C(<algorithm>:<url>) format.
+          - Defaults to looking up C(openldap_version) in C(openldap_source_checksums), or an empty string (skipping checksum verification) if not found.
+      openldap_install_prefix:
+        type: path
+        required: false
+        default: /usr/local
+        description:
+          - Filesystem prefix where OpenLDAP is installed when compiled from source.
+          - Also used to check for an existing custom-built C(slapd) binary at C(<prefix>/libexec/slapd) and locate C(sbin/)/C(bin/) tools.
+      openldap_base_dir:
+        type: path
+        required: false
+        default: /opt/openldap
+        description:
+          - Base directory for OpenLDAP runtime data (C(data/)), dynamic configuration (C(config/)), certificates (C(certs/)), and bootstrap LDIF files.
+      openldap_base_dn:
+        type: str
+        required: false
+        default: dc=moukail,dc=nl
+        description:
+          - Root Distinguished Name (suffix) of the MDB directory database (for example, C(dc=moukail,dc=nl)).
+      openldap_organization:
+        type: str
+        required: false
+        default: Moukail
+        description:
+          - Organization name (C(o) attribute) set on the base DN entry during directory initialization.
+      openldap_user:
+        type: str
+        required: false
+        default: ldap
+        description:
+          - System user account that owns OpenLDAP directories and runs the C(slapd) daemon.
+      openldap_group:
+        type: str
+        required: false
+        default: ldap
+        description:
+          - System group that owns OpenLDAP directories and runs the C(slapd) daemon.
+      openldap_root_dn:
+        type: str
+        required: false
+        default: cn=admin,{{ openldap_base_dn }}
+        description:
+          - Root administrator Distinguished Name (C(olcRootDN)) for the MDB directory database.
+      openldap_root_password:
+        type: str
+        required: true
+        no_log: true
+        description:
+          - Plaintext password for C(openldap_root_dn), hashed with C(slappasswd -h '{SSHA}') during configuration and used to initialize the base DIT.
+          - Must be supplied by the caller (for example via Ansible Vault or play/group variables).
+      openldap_schema_dir:
+        type: path
+        required: false
+        default: "{{ openldap_install_prefix }}/etc/openldap/schema"
+        description:
+          - Directory containing OpenLDAP LDIF schema files (C(core.ldif), C(cosine.ldif), C(nis.ldif), C(inetorgperson.ldif)) included during C(cn=config) bootstrap.
+      openldap_tls_enabled:
+        type: bool
+        required: false
+        default: false
+        description:
+          - Enable TLS support (StartTLS on port 389 and LDAPS on port 636) in C(cn=config) and C(slapd.service).
+      openldap_tls_require:
+        type: bool
+        required: false
+        default: false
+        description:
+          - Require TLS (C(olcSecurity: tls=1)) on the MDB database when C(openldap_tls_enabled) is true.
+      openldap_tls_ca_file:
+        type: path
+        required: false
+        default: "{{ openldap_base_dir }}/certs/ca.crt"
+        description:
+          - Path to the CA certificate file configured in C(olcTLSCACertificateFile).
+      openldap_tls_cert_file:
+        type: path
+        required: false
+        default: "{{ openldap_base_dir }}/certs/server.crt"
+        description:
+          - Path to the server certificate file configured in C(olcTLSCertificateFile).
+      openldap_tls_key_file:
+        type: path
+        required: false
+        default: "{{ openldap_base_dir }}/certs/server.key"
+        description:
+          - Path to the server private key file configured in C(olcTLSCertificateKeyFile).
+      openldap_tls_protocol_min:
+        type: str
+        required: false
+        default: "3.3"
+        description:
+          - Minimum TLS protocol version for C(olcTLSProtocolMin) (C(3.3) = TLS 1.2, C(3.4) = TLS 1.3).
